@@ -101,7 +101,18 @@ Sprite = function () {
   this.bridgesH = true;
   this.bridgesV = true;
 
+  // collidesWith determines the list of sprites that can interact with this sprite.		
+  // Anything not in this list will just pass right through this sprite.
+
   this.collidesWith = [];
+
+ // getInterference returns a list of sprites that this sprite cannot spawn on top of.		
+ // By default this is the same as collides with.  The exception is that ships can		
+ // collide with coins, but they can also spawn on top of coins.		
+
+ this.getInterference = function () {		
+    return this.collidesWith;		
+ }
 
   this.x     = 0;
   this.y     = 0;
@@ -394,7 +405,29 @@ Ship = function () {
 
   this.postMove = this.wrapPostMove;
 
-  this.collidesWith = ["asteroid", "bigalien", "alienbullet"];
+  this.collidesWith = ["asteroid", "bigalien", "alienbullet", "coin"];		  
+	  this.getInterference = function () {		
+	    return ["asteroid", "bigalien", "alienbullet"];		
+	  }		
+			
+	  this.shoot = function() {		
+	    for (var i = 0; i < this.bullets.length; i++) {		
+	      if (!this.bullets[i].visible) {		
+	        SFX.laser();		
+	        var bullet = this.bullets[i];		
+	        var rad = ((this.rot-90) * Math.PI)/180;		
+	        var vectorx = Math.cos(rad);		
+	        var vectory = Math.sin(rad);		
+	        // move to the nose of the ship		
+	        bullet.x = this.x + vectorx * 4;		
+	        bullet.y = this.y + vectory * 4;		
+	        bullet.vel.x = 6 * vectorx + this.vel.x;		
+	        bullet.vel.y = 6 * vectory + this.vel.y;		
+	        bullet.visible = true;		
+	        break;		
+	      }		
+	    }		
+	  }
 
   this.preMove = function (delta) {
     if (KEY_STATUS.left) {
@@ -448,6 +481,7 @@ Ship = function () {
   };
 
   this.collision = function (other) {
+    if (other.name != 'coin') {
     SFX.explosion();
     Game.explosionAt(other.x, other.y);
     Game.FSM.state = 'player_died';
@@ -455,6 +489,7 @@ Ship = function () {
     this.currentNode.leave(this);
     this.currentNode = null;
     Game.lives--;
+    }
   };
 
 };
@@ -668,6 +703,20 @@ Asteroid = function () {
 
   this.collidesWith = ["ship", "bullet", "bigalien", "alienbullet"];
 
+  this.breakIntoFragments = function () {		
+	    for (var i = 0; i < 3; i++) {		
+	      var roid = $.extend(true, {}, this);		
+	      roid.vel.x = Math.random() * 6 - 3;		
+	      roid.vel.y = Math.random() * 6 - 3;		
+	      if (Math.random() > 0.5) {		
+	        roid.points.reverse();		
+	      }		
+	      roid.vel.rot = Math.random() * 2 - 1;		
+	      roid.move(roid.scale * 3); // give them a little push		
+	      Game.sprites.push(roid);		
+	    }		
+	  }
+
   this.collision = function (other) {
     SFX.explosion();
     if (other.name == "bullet") Game.score += 120 / this.scale;
@@ -691,6 +740,41 @@ Asteroid = function () {
   };
 };
 Asteroid.prototype = new Sprite();
+
+Coin = function () {		
+	  this.init("coin",		
+	            [-5,  0,		
+	              0,  5,		
+	              5,  0,		
+	              0, -5]);		
+			
+	  this.collidesWith = ["ship"];		
+			
+	  this.newPosition = function () {		
+	    this.x = Math.random() * Game.canvasWidth;		
+	    this.y = Math.random() * Game.canvasHeight;		
+	  };		
+			
+	  this.newValue = function () {		
+	    this.value = Math.floor(Math.random() * 10 + 1) * 10;		
+	  }		
+			
+	  this.setup = function () {		
+	    this.newPosition();		
+	    this.newValue();		
+	  };		
+			
+	  this.collision = function (other) {		
+	    Game.score += this.value;		
+	    SFX.explosion();		
+	    this.visible = false;		
+	    Game.nextCoinTime = Date.now() + (10000 * Math.random());		
+	    this.newPosition();		
+	    this.newValue();		
+	  }		
+			
+	}		
+	Coin.prototype = new Sprite();
 
 Explosion = function () {
   this.init("explosion");
@@ -896,7 +980,7 @@ Game = {
   bigAlien: null,
 
   nextBigAlienTime: null,
-
+  nextCoinTime: null,
 
   spawnAsteroids: function (count) {
     if (!count) count = this.totalAsteroids;
@@ -955,6 +1039,7 @@ Game = {
       Game.spawnAsteroids();
 
       Game.nextBigAlienTime = Date.now() + 30000 + (30000 * Math.random());
+      Game.nextCoinTime = Date.now() + 2000 + (10000 * Math.random());
 
       this.state = 'spawn_ship';
     },
@@ -982,6 +1067,10 @@ Game = {
           Date.now() > Game.nextBigAlienTime) {
         Game.bigAlien.visible = true;
         Game.nextBigAlienTime = Date.now() + (30000 * Math.random());
+	}		
+	if (!Game.coin.visible &&		
+	     Date.now() > Game.nextCoinTime) {		
+	        Game.coin.visible = true;
       }
     },
     new_level: function () {
@@ -1110,6 +1199,12 @@ $(function () {
   extraDude.preMove = null;
   extraDude.children = [];
 
+var coin = new Coin();		
+	  coin.setup();		
+	  sprites.push(coin);		
+	  Game.coin = coin;		
+			
+
   var i, j = 0;
 
   var paused = false;
@@ -1208,7 +1303,7 @@ $(function () {
   };
 
   mainLoop();
-
+   var mainLoopId = setInterval(mainLoop, 25);
   $(window).keydown(function (e) {
     switch (KEY_CODES[e.keyCode]) {
       case 'f': // show framerate
